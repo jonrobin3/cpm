@@ -3,12 +3,19 @@
 //     go build cpm.go
 //
 // RUN INSTRUCTIONS:
-//     go cpm
+//     ./cpm [k=int] graphFileDef
 //
 // PARAMETERS:
-// If you want to change the clique size (k), simply change the k
-// variable in the main and recompile. I did not have time to make k
-// a command line argument.
+// `-k` is an optional argument that specifies the size of the
+// clique. If k is not specified, it defaults to k=3.
+// 
+// `graphDefinitionFile` defines the graph to operate on. Vertices
+// (nodes) are declared on the left hand side (lhs) of the
+// colon. Vertices on the right hand side (rhs) of the colon define
+// edges from the definition node to the rhs vertex. For example,
+// from the MODEL GRAPH below, v1 is defined as `v1: v2 v3` where
+// `v1` defines the vertex and `v2` and `v3` define the edges. The
+// entire graph is defined below:
 //
 // THEORY OF OPERATION
 //    1- first find all cliques of size k in the graph
@@ -61,7 +68,15 @@
 package main
 
 import "fmt"
-import "strconv"
+import "flag"
+import "os"
+import "regexp"
+import "bufio"
+import "unicode"
+import "strings"
+import "errors"
+
+const MAX_LINE_LEN = 256
 
 type GraphNode struct {
     label string  // any string, but in our model case (v1, v2, ..., v10)
@@ -81,6 +96,12 @@ type Clique struct {
     next *Clique
 }
 
+type NeighborSpec struct {
+    node *GraphNode
+    neighbor_str string
+}
+
+
 // FUNCTION: NewGraphNode
 //
 // DESCRIPTION: Creates a new graph node. The assoc_clique is
@@ -90,7 +111,7 @@ type Clique struct {
 // graph, we must determine if that they have k-1 nodes (vertices)
 // in common. This is easier to do when there is a mapping between
 // the community node and the clique that caused the node to be
-// created. The clique contains a list of vertices.
+// created. The clique simply contains a list of vertices.
 
 func NewGraphNode (label string, assoc_clique *Clique) *GraphNode {
     new_node := new(GraphNode)
@@ -104,9 +125,24 @@ func NewGraphNode (label string, assoc_clique *Clique) *GraphNode {
 // DESCRIPTION: Adds a neighboring vertex to the graph node's
 // neighbor list because there is an edge connecting gn and n.
 
-func (gn *GraphNode) AddNeighbor (n *GraphNode) {
+func AddNeighbor (gn *GraphNode, n *GraphNode) {
     gn.neighbors = append(gn.neighbors, n)
 }
+
+// FUNCTION: GetNode
+//
+// DESCRIPTION: Returns the graph node in g whose label matches
+// label. Otherwise, returns nil.
+
+func  GetNode(g []*GraphNode, label string) *GraphNode {
+    for _, n := range g {
+        if n.label == label {
+            return n
+        }
+    }
+    return nil
+}
+
 
 // FUNCTION: PrintGraph
 //
@@ -118,12 +154,9 @@ func PrintGraph(g []*GraphNode) {
     }
     for _, e := range g {
         fmt.Printf("%s:  ", e.label)
-        glen := len(g)
-        if glen > 0 {
-            for _, n := range e.neighbors {
-                fmt.Printf("%s ", n.label)
-            }
-        }
+		for _, n := range e.neighbors {
+			fmt.Printf("%s ", n.label)
+		}
         fmt.Printf("\n")
     }
 }
@@ -205,13 +238,11 @@ func GetCliqueCandidates (k int, node_list []*GraphNode) *CliqueCandidate {
             
             // only add this candidate list if doesn't already exist
             if new_candidate.IsDuplicate(return_clique_list) == false {
-                
                 new_candidate.next = return_clique_list
                 return_clique_list = new_candidate
             }
         }
     }
-    
     return return_clique_list
 }
 
@@ -286,9 +317,10 @@ func GetCliqueCandidates (k int, node_list []*GraphNode) *CliqueCandidate {
 //              |nil |                      
 //              +----+                      
 //
-// 
-func (candidate_list *CliqueCandidate) MakeCliqueList(
-    examination_node *GraphNode) *Clique {
+//
+
+func MakeCliqueList(candidate_list *CliqueCandidate,
+                    examination_node *GraphNode) *Clique {
 
     var clique_list *Clique = nil
 
@@ -392,12 +424,12 @@ func (clique *Clique) NotRecorded (clique_list *Clique) bool {
     return true
 }
 
-// FUNCTION: AppendClique
+// FUNCTION: MergeCliques
 //
-// DESCRIPTION: Appends src_clique_list to dest_clique_list. Returns
-// dest_clique_list
+// DESCRIPTION: Merges src_clique_list to dest_clique_list, and returns the
+// merged result.
 //
-func AppendClique (dest_clique_list *Clique,
+func MergeCliques (dest_clique_list *Clique,
     src_clique_list *Clique) (*Clique) {
 
         if dest_clique_list == nil {
@@ -447,7 +479,7 @@ func CreateLabel (nodes []*GraphNode) string {
 // so, then there should be an edge from gn and node in the
 // community graph.
 
-func (gn *GraphNode) Kminus1CommonNodes (node *GraphNode, k int) bool {
+func Kminus1CommonNodes (gn *GraphNode, node *GraphNode, k int) bool {
     common_node_count := 0
     return_value := false
 
@@ -470,10 +502,10 @@ func (gn *GraphNode) Kminus1CommonNodes (node *GraphNode, k int) bool {
 // nodes in the generated community graph. If there is, that edge is
 // recorded as one of gn's neighbors.
 
-func (gn *GraphNode) AddNeighbors (graph []*GraphNode, k int) {
+func AddNeighbors (graph []*GraphNode, gn *GraphNode, k int) {
     for _, node := range graph {
-        if gn != node && gn.Kminus1CommonNodes(node, k) {
-            gn.AddNeighbor(node)
+        if gn != node && Kminus1CommonNodes(gn, node, k) {
+            AddNeighbor(gn, node)
         }
     }
 }
@@ -500,96 +532,143 @@ func CreateCommunityGraph (clique_list *Clique, k int) []*GraphNode {
     }
 
     for _, node := range community_graph {
-        node.AddNeighbors(community_graph, k)
+        AddNeighbors(community_graph, node, k)
     }
     
     return community_graph
 }
 
+// FUNCTION: ParseGraphDefFile
+//
+// DESCRIPTION: Given the filename of a graph definition file, this routine
+// parses the file and returns the graph if no syntax or semantic errors are
+// detected. If no errors are detected, then error returns as nil. Otherwise,
+// error will contain specific description of the problem. 
+
+func ParseGraphDefFile(filename string) (g []*GraphNode, error error) {
+
+    var graph []*GraphNode
+    
+    file, err := os.Open(filename)
+    if err != nil {
+        return graph, err
+    }
+    
+    node_def_re:= regexp.MustCompile(`\s*(\w+):\s*(.+)`)
+    node_no_neighbors_re := regexp.MustCompile(`\s*(\w+):\s*`)
+    var neighbor_spec_list []*NeighborSpec
+    line_count := 1
+    
+    lineReader := bufio.NewReaderSize(file, MAX_LINE_LEN)
+    for line, isPrefix, e := lineReader.ReadLine();
+    e == nil;
+    line, isPrefix, e = lineReader.ReadLine() {
+        if isPrefix == false {
+            slices := node_def_re.FindStringSubmatchIndex(string(line))
+            if slices != nil {
+                start := slices[2]
+                end := slices[3]
+                add_node_label := line[start:end]
+                new_node := NewGraphNode(string(add_node_label), nil)
+                graph = append(graph, new_node)
+                if graph == nil {
+                    errstr := fmt.Sprintf("'%s': duplicate node; unable to add to graph\n",
+                               new_node.label)
+                    return graph, errors.New(errstr)
+                }
+                start = slices[4]
+                end = slices[5]
+                neighbors_str := string(line[start:end])
+                // The following code determines if there are just spaces in the
+                // neighbor definition string. For example, a node definition of
+                // 'v1: ' is fine, but we need to account for the space because
+                // the regular expression node_def_re has matched the line but
+                // there are no neighbors.
+                neighbors_defined := false
+                for _, c := range neighbors_str {
+                    if unicode.IsSpace(c) == false {
+                        neighbors_defined = true
+                        break
+                    }
+                }
+                if neighbors_defined == true {                    
+                    neighbor_spec := new(NeighborSpec)
+                    neighbor_spec.node = new_node
+                    neighbor_spec.neighbor_str = neighbors_str
+                    neighbor_spec_list = append(neighbor_spec_list, neighbor_spec)
+                }
+               
+            } else {
+                slices = node_no_neighbors_re.FindStringSubmatchIndex(string(line))
+                if slices == nil {
+                    errstr := fmt.Sprintf("line %d: syntax error\n", line_count)
+                    return graph, errors.New(errstr)                    
+                }
+                start := slices[2]
+                end := slices[3]
+                add_node_label := line[start:end]
+                new_node := NewGraphNode(string(add_node_label), nil)
+                graph = append(graph, new_node)
+            }
+            line_count++
+        }
+    }
+
+   for _, ns := range neighbor_spec_list {
+        neighbors := strings.Split(ns.neighbor_str, " ")
+        for _, neighbor_label := range neighbors {
+            nn := GetNode(graph, neighbor_label)
+            if nn == nil {
+                errstr := fmt.Sprintf( "%s: doesn't exist", neighbor_label)
+                return graph, errors.New(errstr)
+            } else {
+                AddNeighbor(ns.node, nn)
+            }
+        }
+    }
+    
+    return graph, nil
+}
 
 func main() {
     var graph []*GraphNode
-    k := 3
-
-    // Create the vertices
-    for i := 1; i <= 10; i++ {
-        label := "v" + strconv.Itoa(i)
-        v := NewGraphNode(label, nil)
-        graph = append(graph, v)
+    
+    // Process command line args
+    k := flag.Int("k", 3, "the size of k-clique")
+    flag.Parse()
+    
+     if len(flag.Args()) != 1 {
+        fmt.Printf("no graph definition file")
+        return
     }
 
-    // Add all the edges
-    
-    // v1  
-    graph[0].neighbors = append(graph[0].neighbors, graph[1])
-    graph[0].neighbors = append(graph[0].neighbors, graph[2])
+    graph_def_filename := flag.Args()[0]
+    graph, err := ParseGraphDefFile(graph_def_filename)
+    if err != nil {
+        fmt.Printf("%s\n", err.Error())
+		return
+    }
 
-    // v2
-    graph[1].neighbors = append(graph[1].neighbors, graph[0])
-    graph[1].neighbors = append(graph[1].neighbors, graph[2])
-    
-    // v3
-    graph[2].neighbors = append(graph[2].neighbors, graph[1-1])
-    graph[2].neighbors = append(graph[2].neighbors, graph[2-1])
-    graph[2].neighbors = append(graph[2].neighbors, graph[4-1])
-    graph[2].neighbors = append(graph[2].neighbors, graph[5-1])
-    
-    // v4
-    graph[4-1].neighbors = append(graph[4-1].neighbors, graph[3-1])
-    graph[4-1].neighbors = append(graph[4-1].neighbors, graph[5-1])
-    graph[4-1].neighbors = append(graph[4-1].neighbors, graph[6-1])
-    graph[4-1].neighbors = append(graph[4-1].neighbors, graph[7-1])
-    
-    // v5
-    graph[5-1].neighbors = append(graph[5-1].neighbors, graph[3-1])
-    graph[5-1].neighbors = append(graph[5-1].neighbors, graph[4-1])
-    graph[5-1].neighbors = append(graph[5-1].neighbors, graph[6-1])
-    graph[5-1].neighbors = append(graph[5-1].neighbors, graph[7-1])
-    
-    // v6
-    graph[6-1].neighbors = append(graph[6-1].neighbors, graph[4-1])
-    graph[6-1].neighbors = append(graph[6-1].neighbors, graph[5-1])
-    graph[6-1].neighbors = append(graph[6-1].neighbors, graph[7-1])
-    graph[6-1].neighbors = append(graph[6-1].neighbors, graph[8-1])
-    
-    // v7
-    graph[7-1].neighbors = append(graph[7-1].neighbors, graph[4-1])
-    graph[7-1].neighbors = append(graph[7-1].neighbors, graph[5-1])
-    graph[7-1].neighbors = append(graph[7-1].neighbors, graph[6-1])
-    graph[7-1].neighbors = append(graph[7-1].neighbors, graph[8-1])
-    
-    // v8
-    graph[8-1].neighbors = append(graph[8-1].neighbors, graph[6-1])
-    graph[8-1].neighbors = append(graph[8-1].neighbors, graph[7-1])
-    graph[8-1].neighbors = append(graph[8-1].neighbors, graph[9-1])
-    graph[8-1].neighbors = append(graph[8-1].neighbors, graph[10-1])
-    
-    // v9
-    graph[9-1].neighbors = append(graph[9-1].neighbors, graph[8-1])
-    graph[9-1].neighbors = append(graph[9-1].neighbors, graph[10-1])
-    
-    // v10
-    graph[10-1].neighbors = append(graph[10-1].neighbors, graph[8-1])
-    graph[10-1].neighbors = append(graph[10-1].neighbors, graph[9-1])
-
-    fmt.Printf("The original graph:\n")
-    fmt.Printf("-------------------\n")
+    fmt.Printf("k= %d\n", *k)
+    fmt.Printf("The original graph\n")
+    fmt.Printf("------------------\n")
     PrintGraph(graph)
+    fmt.Printf("\n")
 
     var clique_list *Clique = nil
-    for i := 1; i <= 10; i++ {
-        candidate_list := GetCliqueCandidates(k, graph[i-1].neighbors)
+    for _, node := range graph {
+        candidate_list := GetCliqueCandidates(*k, node.neighbors)
         if candidate_list != nil {
-            temp_clique_list := candidate_list.MakeCliqueList(graph[i-1])
+            temp_clique_list := MakeCliqueList(candidate_list, node)
             if clique_list == nil {
                 clique_list = temp_clique_list
             } else {
-                clique_list = AppendClique(clique_list, temp_clique_list)
+                clique_list = MergeCliques(clique_list, temp_clique_list)
             }
         }
     }
  
-    community_graph := CreateCommunityGraph(clique_list, k)
+    community_graph := CreateCommunityGraph(clique_list, *k)
     fmt.Printf("Community graph:\n")
     fmt.Printf("----------------\n")
     PrintGraph(community_graph)
