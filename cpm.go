@@ -3,7 +3,7 @@
 //     go build cpm.go
 //
 // RUN INSTRUCTIONS:
-//     ./cpm [k=int] graphFileDef
+//     ./cpm [-k=int] graphFileDef
 //
 // PARAMETERS:
 // `-k` is an optional argument that specifies the size of the
