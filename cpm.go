@@ -14,8 +14,19 @@
 // colon. Vertices on the right hand side (rhs) of the colon define
 // edges from the definition node to the rhs vertex. For example,
 // from the MODEL GRAPH below, v1 is defined as `v1: v2 v3` where
-// `v1` defines the vertex and `v2` and `v3` define the edges. The
-// entire graph is defined below:
+// `v1` defines the vertex and `v2` and `v3` define the edges. Here's
+// the definition of the MODEL GRAPH:
+//
+// v1: v2 v3
+// v2: v1 v3
+// v3: v1 v2 v4 v5
+// v4: v3 v5 v6 v7
+// v5: v3 v4 v6 v7
+// v6: v4 v5 v7 v8
+// v7: v4 v5 v6 v8
+// v8: v6 v7 v9 v10
+// v9: v8 v10
+// v10: v8 v9
 //
 // THEORY OF OPERATION
 //    1- first find all cliques of size k in the graph
