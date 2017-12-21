@@ -1,7 +1,1 @@
-<script type="text/x-mathjax-config">MathJax.Hub.Config({tex2jax: {inlineMath:[['$','$']]}});</script>
-
-<script type="text/javascript"
-
-src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
-
-$$ k_{n+1} $$
+Okay; this will display as palatino. That's pretty cool. You have to have double space capability. That will work for me. You still have not made it to the second line. \\( x = {-b \pm \sqrt{b^2-4ac} \over 2a} \\)
